@@ -1,17 +1,16 @@
-%%
+%% Initialization
 
-file_path = '/Users/zahedi/bwSyncAndShare/Article_QuantMorphComp/Model_Results_Data/';
+clear;
 
-suffix = '_noPert_h7cm';
-files(1).name = [file_path '/NoPerturbationSameHoppingHeight/' 'results_motor' suffix];
-files(2).name = [file_path '/NoPerturbationSameHoppingHeight/' 'results_muscle_linFv_constFl_FFB' suffix];
-files(3).name = [file_path '/NoPerturbationSameHoppingHeight/' 'results_muscle_HillFv_HillFl_FFB' suffix];
+files(1).name = 'data/DCMot';
+files(2).name = 'data/MusLin';
+files(3).name = 'data/MusFib';
 
 %% 1. Step: Extract min/max values for each column that will be used
 p_min  = 0; p_max = 0;
 ac_min = 0; ac_max = 0;
 v_min  = 0; v_max = 0;
-a_min  = 0; a_max = 0;
+a_min  = 0; a_max = 1.0;
 s_min  = 0; s_max = 0;
 
 domain_string = '';
@@ -23,18 +22,9 @@ for file_index = 1:length(files)
     position      = SimData(:,2);
     velocity      = SimData(:,3);
     accelaration  = SimData(:,4);
-    action        = SimData(:,10);
     muscle_sensor = SimData(:,5);
     
-    if isempty(strfind(files(file_index).name,'muscle'))
-        action = (action + 20 ) / 40;
-    end
-    
     files(file_index).position = position;
-    files(file_index).velocity = velocity;
-    files(file_index).accelaration = accelaration;
-    files(file_index).action = action;
-    files(file_index).muscle_sensor = muscle_sensor;
     
     if file_index == 1
         p_min = min(position);
@@ -42,9 +32,6 @@ for file_index = 1:length(files)
         
         v_min = min(velocity);
         v_max = max(velocity);
-        
-        a_min = min(action);
-        a_max = max(action);
         
         s_min = min(muscle_sensor);
         s_max = max(muscle_sensor);
@@ -58,9 +45,6 @@ for file_index = 1:length(files)
         v_min = min(v_min, min(velocity));
         v_max = max(v_max, max(velocity));
         
-        a_min = min(a_min, min(action));
-        a_max = max(a_max, max(action));
-        
         ac_min = min(ac_min, min(accelaration));
         ac_max = max(ac_max, max(accelaration));
         
@@ -68,25 +52,24 @@ for file_index = 1:length(files)
         s_max = max(s_max, max(muscle_sensor));
     end
 end
+
 domain_string = [domain_string 'Domains\n' ...
     sprintf('  Position:        %f, %f\n', p_min, p_max) ...
     sprintf('  Velocity:        %f, %f\n', v_min, v_max) ...
     sprintf('  Accelaration:    %f, %f\n', ac_min, ac_max) ...
     sprintf('  Actuator signal: %f, %f\n', a_min, a_max)];
 
-%%
-for bins = [100]
-    
-    % 2. Step: Discretise data
+
+for bins = [300]
+    fprintf('Bins = %d\n', bins);
     w_bins = bins;
     a_bins = bins;
     s_bins = bins;
     
-    %%
-    %fprintf('Binning the data with |W| = %d, |A| = %d, |S| = %d\n', w_bins, a_bins, s_bins);
+    tic
+    
     for file_index = 1:length(files)
         [pathstr,name,ext] = fileparts(files(file_index).name);
-        % fprintf('Discretising file %s\n', name);
         load(files(file_index).name, 'SimData');
         
         position      = SimData(:,2);
@@ -96,14 +79,17 @@ for bins = [100]
         muscle_sensor = SimData(:,5);
         
         if isempty(strfind(files(file_index).name,'muscle'))
-            action = (action + 20 ) / 40;
+            action = (action - min(action)) / (max(action) - min(action));
         end
-        
-        fprintf('File %s min %f max %f\n', files(file_index).name, min(action), max(action));
-        
+
         files(file_index).d_position     = discretiseMatrix(position, p_min, p_max, w_bins);
         files(file_index).d_velocity     = discretiseMatrix(velocity, v_min, v_max, w_bins);
         files(file_index).d_accelaration = discretiseMatrix(accelaration, ac_min, ac_max, w_bins);
+        files(file_index).position       = position;
+        files(file_index).velocity       = velocity;
+        files(file_index).accelaration   = accelaration;
+        files(file_index).action         = action;
+        files(file_index).msensor        = muscle_sensor;
         
         files(file_index).a              = discretiseMatrix(action, a_min, a_max, a_bins);
         files(file_index).w              = combineAndRelabelBinnedMatrix([files(file_index).d_position, files(file_index).d_velocity, files(file_index).d_accelaration]);
@@ -123,36 +109,38 @@ for bins = [100]
     %fprintf('Starting calculations\n')
     for file_index = 1:length(files)
         [pathstr,name,ext] = fileparts(files(file_index).name);
-        %fprintf('Working on file %s\n', name);
+        files(file_index).short_name = name;
+        
+        fprintf('Working on file %s\n', name);
         w2 = files(file_index).w(2:end,:);
         w1 = files(file_index).w(1:end-1,:);
         a1 = files(file_index).a(1:end-1,:);
         s1 = files(file_index).s(1:end-1,:);
         
+        fprintf('Calculate MC_W\n');
+        tic
+        mcwd = MC_W_dynamic(w2, w1, a1);
+        files(file_index).mcd  = mcwd;
+        files(file_index).mcw  = MC_W(w2, w1, a1);
+        fprintf('check %f\n', files(file_index).mcw - mean(mcwd));
+        toc
         
-        fprintf('Calculating MC_MI\n')
+        fprintf('Calculate MC_MI\n');
+        tic
+        mcmid = MC_MI_dynamic(w2, w1, s1, a1);
+        files(file_index).mcd  = [files(file_index).mcd mcmid];
         files(file_index).mcmi = MC_MI(w2, w1, s1, a1);
-        fprintf('  Result %f\n', files(file_index).mcmi);
-        fprintf('Calculating MC_W\n')
-        files(file_index).mcw = MC_W(w2, w1, a1);
-        fprintf('  Result %f\n', files(file_index).mcw);
-        %fprintf('Calculating MC_C\n')
-        %files(file_index).mcc = MC_C(w2, w1, s1, a1);
-        %fprintf('  Result %f\n', files(file_index).mcc);
+        fprintf('check %f\n', files(file_index).mcmi - mean(mcmid));
+        toc
+        
     end
     
-    %% log to console
-    for file_index = 1:length(files)
-        [pathstr,name,ext] = fileparts(files(file_index).name);
-        fprintf('Filename %s\n', name);
-        fprintf('  MC_W:  %f\n', files(file_index).mcw);
-        fprintf('  MC_MI: %f\n', files(file_index).mcmi);
-        %fprintf('  MC_C:  %f\n', files(file_index).mcc);
-    end
+    %% write the data to csv files
+    csvwrite(sprintf('data/mc_data_dyn_dcmot_%d.csv', bins), files(1).mcd);
+    csvwrite(sprintf('data/mc_data_dyn_lin_%d.csv',   bins), files(2).mcd);
+    csvwrite(sprintf('data/mc_data_dyn_fib_%d.csv',   bins), files(3).mcd);
     
-    %% log to file
-    %filename = sprintf('/Users/zahedi/bwSyncAndShare/Article_QuantMorphComp/results/no pertubation/global_binning_results_w%d_a%d_s%d%s_%dbins.txt', w_bins, a_bins, s_bins, suffix, bins);
-    filename = sprintf('/Users/zahedi/projects/QuantMorphComp/data/global_binning_results_w%d_a%d_s%d%s_%dbins.txt', w_bins, a_bins, s_bins, suffix, bins);
+    filename = sprintf('data/results_w%d_a%d_s%d.txt', w_bins, a_bins, s_bins);
     fprintf('Writing results to %s\n', filename);
     
     fileID = fopen(filename,'w');
@@ -163,8 +151,34 @@ for bins = [100]
         fprintf(fileID, 'Filename %s\n', name);
         fprintf(fileID, '  MC_W:  %f\n', files(file_index).mcw);
         fprintf(fileID, '  MC_MI: %f\n', files(file_index).mcmi);
-        %fprintf(fileID, '  MC_C:  %f\n', files(file_index).mcc);
     end
     fclose(fileID);
     fprintf('done.\n')
+end
+
+
+%% Writing hopping data
+
+for file_index = 1:length(files)
+    [pathstr,name,ext] = fileparts(files(file_index).name);
+    % fprintf('Discretising file %s\n', name);
+    load(files(file_index).name, 'SimData');
+    
+    position      = SimData(:,2);
+    velocity      = SimData(:,3);
+    accelaration  = SimData(:,4);
+    action        = SimData(:,10);
+    
+    r = [];
+    r = [r position];
+    r = [r velocity];
+    r = [r accelaration];
+    r = [r action];
+    if isempty(strfind(files(file_index).name,'muscle')) == 0
+        muscle_sensor = SimData(:,5);
+        r = [r muscle_sensor];
+    end
+    
+    fprintf('writing to data/hopping_data_%s.csv\n', name);
+    csvwrite(sprintf('data/hopping_data_%s.csv', name), r);    
 end
