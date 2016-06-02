@@ -1,3 +1,5 @@
+<b> Please note that this repository has been merged with the <i> entropy </i> repository and will, therefore, not be updated anymore. Future releases, update, bug fixes will be available at [https://github.com/kzahedi/entropy.](https://github.com/kzahedi/entropy) </b>
+
 # MC
 Quantifying Morphological Computation
 
@@ -10,3 +12,4 @@ The files and data used in that publication can be found in the directory <b> ma
 Running the script <b> analyse_hopping_data </b> will produce the results found in the publication.
 
 A C++ implementation can be found at [https://github.com/kzahedi/entropy.](https://github.com/kzahedi/entropy)
+
